@@ -1,0 +1,19 @@
+# Localizador de Contatos Empresariais — dependências
+# Instalação:  pip install -r requirements.txt
+# Depois:      playwright install chromium
+
+# --- Planilhas -------------------------------------------------------------
+openpyxl>=3.1.2          # leitura/escrita .xlsx preservando formatação
+pandas>=2.1.0            # análise auxiliar e exportações tabulares
+
+# --- Rede e extração -------------------------------------------------------
+requests>=2.31.0         # cliente HTTP
+beautifulsoup4>=4.12.2   # parsing de HTML
+lxml>=5.0.0              # parser rápido usado pelo BeautifulSoup
+fake-useragent>=1.5.0    # rotação de User-Agent
+
+# --- Automação de navegador (Google Maps / Business Profile) ---------------
+playwright>=1.44.0       # requer: playwright install chromium
+
+# --- Interface gráfica -----------------------------------------------------
+customtkinter>=5.2.2     # widgets modernos sobre Tkinter

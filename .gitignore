@@ -1,0 +1,16 @@
+# Ambiente virtual
+.venv/
+venv/
+
+# Bytecode
+__pycache__/
+*.py[cod]
+
+# Arquivos gerados pela aplicação
+saida/
+config_usuario.json
+*.xlsx.tmp
+
+# Editores
+.vscode/
+.idea/
