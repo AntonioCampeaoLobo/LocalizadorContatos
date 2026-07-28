@@ -424,7 +424,12 @@ def aplicar_dados_cnpj(
     registrados = 0
     for telefone in dados.telefones:
         conf = confianca
-        if not utils.ddd_coerente_com_uf(telefone, dados.uf or empresa.uf):
+        # Checagem por cidade, não por UF: um (11) da capital no cadastro de uma
+        # empresa de Amparo é sinal de contato desatualizado ou de outra
+        # unidade, e não merece a mesma confiança de um DDD local.
+        if not utils.ddd_coerente_com_local(
+            telefone, dados.municipio or empresa.cidade, dados.uf or empresa.uf
+        ):
             conf = Confianca.MEDIA if conf == Confianca.ALTA else Confianca.BAIXA
         if resultado.adicionar_telefone(telefone, evidencia, conf):
             registrados += 1

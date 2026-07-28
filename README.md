@@ -14,7 +14,7 @@ identidade da empresa, o campo fica em branco e a linha vai para revisão manual
 
 ## Índice
 
-- [Instalação](#instalação)
+- [Instalação do zero (passo a passo)](#instalação)
 - [Uso](#uso)
 - [Como a planilha é preenchida](#como-a-planilha-é-preenchida)
 - [Fontes e níveis de confiança](#fontes-e-níveis-de-confiança)
@@ -30,24 +30,200 @@ identidade da empresa, o campo fica em branco e a linha vai para revisão manual
 
 ## Instalação
 
-Requer **Python 3.10 ou superior**.
+Guia completo do zero, para quem acabou de baixar o projeto. Se você já tem
+Python e Git, pule direto para o [passo 3](#3-baixar-o-projeto).
+
+### 1. Instalar o Python
+
+Baixe em **[python.org/downloads](https://www.python.org/downloads/)** — versão
+**3.10 ou superior**.
+
+> No instalador do Windows, marque **"Add python.exe to PATH"** na primeira
+> tela, antes de clicar em Install. Sem isso o comando `python` não funciona no
+> terminal e você terá que reinstalar.
+
+Confira abrindo um terminal novo (PowerShell no Windows, Terminal no
+macOS/Linux):
+
+```bash
+python --version
+```
+
+Deve aparecer algo como `Python 3.12.2`. Se disser que o comando não foi
+encontrado, feche e reabra o terminal; se persistir, reinstale marcando a opção
+do PATH.
+
+### 2. Instalar o Git
+
+Baixe em **[git-scm.com/downloads](https://git-scm.com/downloads)** e aceite as
+opções padrão. Confira:
+
+```bash
+git --version
+```
+
+> Alternativa sem Git: na página do projeto no GitHub, clique em **Code →
+> Download ZIP**, extraia a pasta e siga a partir do passo 4.
+
+### 3. Baixar o projeto
+
+```bash
+git clone https://github.com/AntonioCampeaoLobo/LocalizadorContatos.git
+```
+
+Entre na pasta criada:
+
+```bash
+cd LocalizadorContatos
+```
+
+**Todos os comandos seguintes são executados de dentro dessa pasta.**
+
+### 4. Criar o ambiente virtual
+
+O ambiente virtual isola as bibliotecas do projeto das do resto do sistema —
+evita conflitos de versão e erros de permissão.
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+```
+
+Isso cria a pasta `.venv`. Ela é local, não vai para o Git e não deve ser
+copiada para outro computador.
+
+### 5. Ativar o ambiente virtual
+
+No **Windows (PowerShell)**:
+
+```bash
+.venv\Scripts\Activate.ps1
+```
+
+No **Windows (Prompt de Comando)**:
+
+```bash
+.venv\Scripts\activate.bat
+```
+
+No **macOS ou Linux**:
+
+```bash
+source .venv/bin/activate
+```
+
+Deu certo quando aparece `(.venv)` no início da linha do terminal.
+
+> **Erro comum no Windows:** se aparecer *"a execução de scripts foi desabilitada
+> neste sistema"*, o PowerShell está bloqueando scripts. Rode o comando abaixo e
+> tente ativar de novo — ele libera apenas para o seu usuário, sem alterar
+> configurações do sistema:
+>
+> ```bash
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+> ```
+
+### 6. Instalar as bibliotecas
+
+```bash
 pip install -r requirements.txt
+```
+
+Leva de 1 a 3 minutos. Se aparecerem erros de permissão, quase sempre significa
+que o ambiente virtual não está ativo — volte ao passo 5 e confirme o `(.venv)`.
+
+### 7. Instalar o navegador do Playwright
+
+```bash
 playwright install chromium
 ```
 
-O último comando baixa o navegador usado para consultar o Google Maps
-(~150 MB). Ele é **opcional**: sem ele a aplicação funciona normalmente, apenas
-sem a fonte Google Business Profile.
+Baixa cerca de 150 MB. É o navegador usado para consultar o Google Maps.
 
-Para conferir o ambiente:
+> Este passo é **opcional**. Sem ele o programa funciona normalmente, apenas sem
+> a fonte Google Business Profile — as demais (site oficial, Receita Federal,
+> buscadores) continuam ativas.
+
+### 8. Conferir se está tudo certo
 
 ```bash
 python main.py --checar
 ```
+
+A resposta esperada é `Todas as dependências estão instaladas.` Se algum item
+aparecer como `[FALTA]`, repita o passo 6.
+
+Opcionalmente, rode a bateria de testes — ela não acessa a internet e leva menos
+de um segundo:
+
+```bash
+python -m unittest discover -s tests
+```
+
+### 9. Executar
+
+Interface gráfica:
+
+```bash
+python main.py
+```
+
+No Windows, o atalho `executar.bat` faz o mesmo e dispensa ativar o ambiente
+virtual — ele detecta a pasta `.venv` sozinho:
+
+```bash
+.\executar.bat
+```
+
+### 10. Primeira execução
+
+Antes de processar uma carteira inteira, rode um teste com poucas empresas para
+conferir a qualidade do resultado:
+
+```bash
+python main.py --cli --planilha "CAMINHO\DA\SUA\PLANILHA.xlsx" --limite 10
+```
+
+Abra `saida\Empresas_Preenchidas.xlsx` e `saida\log.txt` e confira se os
+contatos encontrados batem com as empresas certas. Estando bom, rode sem o
+`--limite`.
+
+> A planilha original **nunca é alterada** — tudo é gravado em
+> `saida\Empresas_Preenchidas.xlsx`.
+
+### Nas próximas vezes
+
+Os passos 1 a 7 são feitos uma única vez. Depois, para usar o programa, basta:
+
+```bash
+cd LocalizadorContatos
+```
+
+E então:
+
+```bash
+.\executar.bat
+```
+
+### Quanto tempo leva o processamento
+
+Medições reais em uma carteira de 409 empresas: cerca de **30 a 45 segundos por
+empresa**, variando conforme quantas fontes estão respondendo.
+
+| Configuração | 100 empresas | 400 empresas |
+|---|---|---|
+| `--threads 5` (padrão) | ~40 min | 2h30 a 3h30 |
+| `--threads 3` | ~1h | 4h a 4h30 |
+| `--threads 2 --delay-min 5 --delay-max 12` | ~2h | 7h a 9h |
+
+A configuração conservadora é mais lenta, porém reduz muito o risco de bloqueio
+por IP nos buscadores.
+
+Pode interromper a qualquer momento: a planilha é salva após **cada** empresa e,
+ao reabrir, as já preenchidas são ignoradas — o processamento continua de onde
+parou. Dá para rodar durante a noite sem supervisão.
+
+> Mantenha o `Empresas_Preenchidas.xlsx` **fechado** no Excel enquanto o
+> programa roda, senão a gravação falha.
 
 ---
 
@@ -128,8 +304,8 @@ O programa localiza as colunas pelo texto do cabeçalho, sem depender da posiç�
   Uma célula com apenas e-mail continua pendente (falta o telefone).
 - Múltiplos telefones e e-mails ficam na mesma célula, um por linha:
   ```
-  (19) 3824-9898
-  (19) 99844-3483
+  (19) 3555-0100
+  (19) 99555-0100
   contato@empresa.com.br
   ```
 - A planilha é salva **após cada empresa**, de forma atômica (grava em arquivo
@@ -207,11 +383,11 @@ pesquisar, o nome é limpo:
 
 | Razão social na planilha | Consulta enviada |
 |---|---|
-| `A. B. CHISTELLI COMERCIAL` | `CHISTELLI COMERCIAL` |
-| `A.R. MARSON MATERIAIS EIRELI` | `MARSON MATERIAIS` |
-| `A1 TRANSPORTES E LOGISTICA LTDA ME` | `A1 TRANSPORTES LOGISTICA` |
+| `A. B. FERRAZONI COMERCIAL` | `FERRAZONI COMERCIAL` |
+| `A.R. BENTANO MATERIAIS EIRELI` | `BENTANO MATERIAIS` |
+| `B2 TRANSPORTES E LOGISTICA LTDA ME` | `B2 TRANSPORTES LOGISTICA` |
 
-> **Caso real:** buscar `"A. B. CHISTELLI COMERCIAL" SUMARE CNPJ` devolvia a
+> **Caso real:** buscar `"A. B. FERRAZONI COMERCIAL" SUMARE CNPJ` devolvia a
 > tabela do Brasileirão **Série B** e o verbete da letra "B" na Wikipédia —
 > nenhum resultado sobre a empresa. A razão social original nunca é usada como
 > consulta; ela permanece apenas como referência para validar a correspondência.
@@ -228,10 +404,10 @@ das palavras genéricas do ramo (`transportes`, `comercio`, `materiais`,
 
 Consequências práticas:
 
-- `ANCONA BUFFET` **não** casa com `ANCONA TRANSPORTES`;
+- `VELTRINI BUFFET` **não** casa com `VELTRINI TRANSPORTES`;
 - `SILVA COMERCIO DE MATERIAIS` **não** casa com `PEREIRA COMERCIO DE MATERIAIS`;
-- `ALAMEDAS OURO VERDE EMPREENDIMENTOS IMOB` (truncado na planilha) **casa**
-  com `Alamedas Ouro Verde Empreendimentos Imobiliários Ltda`.
+- `PORTAIS SERRA AZUL EMPREENDIMENTOS IMOB` (truncado na planilha) **casa**
+  com `Portais Serra Azul Empreendimentos Imobiliários Ltda`.
 
 ### 5. Validação de identidade do site oficial
 
@@ -239,17 +415,32 @@ Um site só é aceito como oficial se:
 
 - o **CNPJ** da empresa aparecer na página (prova definitiva); **ou**
 - pelo menos **dois** tokens distintivos forem confirmados; **ou**
-- o único token distintivo estiver no **próprio domínio** (não basta aparecer
-  no texto).
+- havendo um único token distintivo, ele estiver no **próprio domínio** e o
+  domínio refletir o nome **inteiro** da empresa.
 
 Sem a cidade confirmada na página, a confiança cai para Média.
 
-> **Caso real:** `A & A EXECUTIVA TRANSPORTES LTDA - ME`, de Cosmópolis/SP,
-> casava com `executiva.com.br` — uma empresa do Paraná — porque "executiva" era
-> tratada como token distintivo. Hoje a palavra está na lista de genéricas, a
-> razão social fica sem token identificador e o site é rejeitado. A empresa
-> passou a ser resolvida corretamente pela Receita Federal, com os telefones
-> (19) 3812-3701 e (19) 3812-9109.
+A exigência de o domínio cobrir o nome inteiro é o que separa duas homônimas.
+A cobertura conta **todas** as palavras da razão social, inclusive as genéricas
+— é justamente a palavra genérica que diferencia as duas:
+
+| Razão social | Domínio | Cobertura | Decisão |
+|---|---|---|---|
+| `VELTRINI BUFFET` | `veltrini.app.br` | 50% | rejeita |
+| `VELTRINI TRANSPORTES` | `veltrini.app.br` | 50% | rejeita |
+| `A.R. BENTANO MATERIAIS` | `bentanomateriais.com.br` | 100% | aceita |
+
+> **Caso real:** duas empresas distintas da mesma cidade, uma de buffet e outra
+> de transportes, compartilhavam o token `veltrini` presente no domínio e
+> receberam **contatos idênticos** do mesmo site — que era de outra empresa, em
+> outra região. Foi o erro mais grave encontrado em produção.
+
+> **Caso real:** `J & J EXECUTIVA TRANSPORTES LTDA - ME`, de Cosmópolis/SP,
+> casava com `executiva-exemplo.com.br` — uma empresa do Paraná — porque
+> "executiva" era tratada como token distintivo. Hoje a palavra está na lista de
+> genéricas, a razão social fica sem token identificador e o site é rejeitado.
+> A empresa passou a ser resolvida corretamente pela Receita Federal, com os
+> telefones (19) 3555-1010 e (19) 3555-1011.
 
 ### 6. E-mails de terceiros são descartados
 
@@ -257,7 +448,7 @@ Em um site oficial, só são aceitos e-mails do **próprio domínio** ou de
 provedores gratuitos (Gmail, Hotmail, UOL…). Qualquer outro domínio pertence a
 um terceiro citado na página.
 
-> **Caso real:** `comunicacao@cosmopolis.sp.gov.br` — o e-mail da prefeitura —
+> **Caso real:** `imprensa@prefeitura-exemplo.sp.gov.br` — o e-mail da prefeitura —
 > foi capturado do site de uma transportadora e quase entrou na planilha.
 
 ### 7. Validação rigorosa de telefones
@@ -269,15 +460,25 @@ datas, sequências repetidas e números sem DDD isolados.
 Formatos reconhecidos, incluindo os legados das carteiras antigas:
 
 ```
-(19) 3824-9898      19 99844-3483       +55 11 4004-1234
-019 38429898        (019) 3225-8238     1938249898
-0800 771 2233       5519998443483
+(19) 3555-0100      19 99555-0100       +55 11 4004-5500
+019 35550100        (019) 3555-0200     1935550100
+0800 555 0100       5519995550100
 ```
 
 Números sem DDD herdam o do número imediatamente anterior — convenção
-tipográfica brasileira (`(19) 3824-9898 / 99844-3483`) — mas somente se
+tipográfica brasileira (`(19) 3555-0100 / 99555-0100`) — mas somente se
 estiverem a menos de 40 caracteres de distância e sem texto corrido entre eles.
 Números com DDD herdado têm a confiança rebaixada.
+
+**Coerência de DDD com a localidade.** A checagem é feita no nível da **cidade**,
+não da UF. Comparar por estado é grosseiro demais: um telefone `(11)` da capital
+passa como "SP" para uma empresa do interior, embora a região dela seja `19`.
+Um DDD incoerente derruba a confiança e, sem o CNPJ confirmando a identidade,
+leva o telefone direto para Baixa — ou seja, ele não é gravado.
+
+O mapa `DDD_POR_CIDADE` em `config.py` cobre as cidades do interior paulista;
+cidades fora dele caem na checagem por UF, mais frouxa porém segura. Para outras
+regiões, basta acrescentar as cidades ao mapa.
 
 ### 8. WhatsApp só por link declarado
 
@@ -312,17 +513,17 @@ Exemplo de bloco do `log.txt`:
 ```
 ==============================================================================
 Empresa:
-A & A EXECUTIVA TRANSPORTES LTDA - ME
+J & J EXECUTIVA TRANSPORTES LTDA - ME
 
 Cidade:
 COSMOPOLIS
 
 CNPJ:
-17.199.907/0001-24
+11.222.333/0001-81
 
 Telefone encontrado:
-(19) 3812-3701
-(19) 3812-9109
+(19) 3555-1010
+(19) 3555-1011
 
 Site:
 (nenhum)
@@ -331,7 +532,7 @@ Fonte utilizada:
 Receita Federal
 
 URL utilizada:
-https://brasilapi.com.br/api/cnpj/v1/17199907000124
+https://brasilapi.com.br/api/cnpj/v1/11222333000181
 
 Confiança:
 Média
@@ -343,7 +544,7 @@ Status:
 Encontrado
 
 Origem de cada dado:
-  - (19) 3812-3701  [Média]  Receita Federal  <https://brasilapi.com.br/api/cnpj/v1/17199907000124>
+  - (19) 3555-1010  [Média]  Receita Federal  <https://brasilapi.com.br/api/cnpj/v1/11222333000181>
 ==============================================================================
 ```
 
@@ -371,7 +572,7 @@ LocalizadorContatos/
 ├── requirements.txt
 ├── README.md
 ├── tests/
-│   └── test_extracao.py    67 testes das rotinas críticas
+│   └── test_extracao.py    79 testes das rotinas críticas
 └── saida/                  arquivos gerados
 ```
 
@@ -408,10 +609,14 @@ relevantes:
 | `SIMILARIDADE_MINIMA_DUVIDA` | 0.62 | abaixo disso o candidato é descartado |
 | `EXIGIR_CNPJ_PARA_TOKEN_UNICO` | `False` | modo paranoico: nomes com um só token distintivo exigem CNPJ |
 | `MIN_TOKENS_CONFIRMACAO_SITE` | 2 | tokens necessários para aceitar um site |
+| `COBERTURA_MINIMA_DOMINIO` | 0.8 | fração do nome que o domínio deve conter |
 | `PALAVRAS_GENERICAS` | — | palavras que não identificam a empresa |
+| `DDD_POR_CIDADE` | — | DDD esperado por cidade; ausentes caem na checagem por UF |
 | `HERDAR_DDD` | `True` | herança de DDD entre números vizinhos |
 | `INCLUIR_FAX_DO_CADASTRO` | `False` | inclui o fax da Receita como contato |
 | `PARAR_NA_PRIMEIRA_ALTA` | `True` | encerra a cascata ao confirmar telefone de confiança Alta |
+| `DISJUNTOR_FALHAS` / `DISJUNTOR_PAUSA` | 3 / 600 s | falhas para desligar uma fonte e por quanto tempo |
+| `TIMEOUT_CONEXAO` / `TIMEOUT_HTTP` | 5 s / 15 s | limites de conexão e de leitura |
 
 **Para máxima precisão** (menos contatos, praticamente zero erro):
 
@@ -437,10 +642,24 @@ MIN_TOKENS_CONFIRMACAO_SITE = 1
 - Recuo automático diante de HTTP 429/503.
 - **Detecção de captcha**: ao encontrar um desafio anti-robô, o motor pausa,
   avisa o usuário e permite retomar. Sem intervenção, retoma sozinho após 90 s.
+- **Timeout de conexão (5 s) separado do de leitura (15 s)**: um host
+  inalcançável trava no aperto de mão TCP, e esperar o timeout de leitura
+  inteiro seria desperdício.
+- **Disjuntor por fonte** (`utils.Disjuntor`): após 3 falhas consecutivas, a
+  fonte é desligada por 10 minutos, com estado meio-aberto para recuperação.
 
-Estimativa: cerca de **1 a 2 minutos por empresa** com 5 threads e as fontes
-todas ativas. Uma carteira de 400 empresas leva de 2 a 4 horas — bastante
-variável conforme a disponibilidade das fontes.
+O disjuntor existe por causa da pior falha de rede na prática: a fonte bloqueada
+por IP não devolve erro HTTP, apenas recusa a conexão.
+
+> **Caso real:** com o DuckDuckGo bloqueado, cada consulta gastava o timeout
+> inteiro antes de cair para o buscador seguinte. Com cerca de 5 consultas por
+> empresa, 10 empresas passaram de **6 minutos** para **mais de 13 minutos sem
+> concluir nenhuma**. Com o disjuntor, a fonte morta é descartada logo nas
+> primeiras tentativas e o processamento segue pelas demais.
+
+Estimativa: **30 a 45 segundos por empresa** com 5 threads. Uma carteira de 400
+empresas leva de 2h30 a 3h30 — bastante variável conforme a disponibilidade das
+fontes.
 
 ---
 
@@ -450,8 +669,8 @@ variável conforme a disponibilidade das fontes.
 python -m unittest discover -s tests -v
 ```
 
-67 testes cobrindo extração e validação de telefones (incluindo os formatos
-legados `019 38429898` e `1938249898`), e-mails, WhatsApp, CNPJ, comparação de
+79 testes cobrindo extração e validação de telefones (incluindo os formatos
+legados `019 35550100` e `1935550100`), e-mails, WhatsApp, CNPJ, comparação de
 nomes, classificação de domínios, validação de identidade de site, a garantia de
 procedência dos dados e a detecção de captcha.
 
@@ -488,7 +707,7 @@ contra a carteira de Campinas.
   mas **não** preserva gráficos, imagens e tabelas dinâmicas. Planilhas com
   esses elementos devem ser tratadas com cuidado — a original nunca é alterada.
 - A taxa de sucesso depende muito do ramo. Empresas pequenas em nome de pessoa
-  física (`ANDERSON OLIVEIRA`, `ADALBERTO CHISOSTOMO`) frequentemente não têm
+  física (`PAULO MENDES`, `ROBERTO CAETANO`) frequentemente não têm
   presença online e ficarão em branco — o comportamento correto.
 - Com o Maps ativo, cada thread abre seu próprio Chromium. Cinco threads
   consomem memória considerável; reduza o número se a máquina for modesta.
