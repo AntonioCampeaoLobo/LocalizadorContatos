@@ -250,12 +250,39 @@ class RastreadorSite:
                     f"Token distintivo ({token!r}) não encontrado na página.",
                 )
 
+            # O token estar no domínio não basta: "ancona.app.br" contém o
+            # token de "ANCONA BUFFET" e o de "ANCONA TRANSPORTES" — duas
+            # empresas distintas. O domínio precisa refletir o nome *inteiro*,
+            # e não apenas uma palavra dele.
+            cobertura_dominio = self._cobertura_do_dominio(empresa, nucleo_dominio)
+
+            if cobertura_dominio >= config.COBERTURA_MINIMA_DOMINIO:
+                if cidade_ok:
+                    return (
+                        True, teto,
+                        f"Domínio corresponde ao nome ({cobertura_dominio:.0%}) "
+                        "e cidade confirmada.",
+                    )
+                return (
+                    True, _rebaixar(teto),
+                    f"Domínio corresponde ao nome ({cobertura_dominio:.0%}), "
+                    "cidade não localizada na página.",
+                )
+
+            # Domínio parcial: só é aceito se a cidade confirmar, e ainda assim
+            # sem confiança máxima.
             if cidade_ok:
-                return True, teto, f"Token {token!r} no domínio e cidade confirmada."
+                return (
+                    True, _rebaixar(teto),
+                    f"Token {token!r} no domínio e cidade confirmada, mas o "
+                    f"domínio cobre apenas {cobertura_dominio:.0%} do nome.",
+                )
+
             return (
-                True,
-                _rebaixar(teto),
-                f"Token {token!r} no domínio, cidade não localizada na página.",
+                False,
+                Confianca.BAIXA,
+                f"Domínio {dominio!r} cobre apenas {cobertura_dominio:.0%} do nome "
+                f"e a cidade não foi localizada: pode ser empresa homônima.",
             )
 
         # --- 3) Confirmação insuficiente de tokens ---------------------
@@ -283,6 +310,26 @@ class RastreadorSite:
             f"Nome confirmado ({len(cobertos)}/{len(distintivos)} tokens), "
             "cidade não localizada na página.",
         )
+
+    @staticmethod
+    def _cobertura_do_dominio(empresa: Empresa, nucleo_dominio: str) -> float:
+        """
+        Fração dos tokens da razão social presentes no domínio.
+
+        Diferente da cobertura por *tokens distintivos*, aqui contam **todas**
+        as palavras do nome, inclusive as genéricas — é justamente a palavra
+        genérica que distingue duas empresas homônimas:
+
+        * ``ANCONA BUFFET`` x ``ancona.app.br`` -> 1/2 = 50% (rejeita)
+        * ``ANCONA TRANSPORTES`` x ``ancona.app.br`` -> 1/2 = 50% (rejeita)
+        * ``A.R. MARSON MATERIAIS`` x ``marsonmateriais.com.br`` -> 2/2 = 100%
+        """
+        tokens = [t for t in utils.matcher.tokens(empresa.razao_social) if len(t) >= 3]
+        if not tokens:
+            return 0.0
+        alvo = nucleo_dominio.replace(" ", "")
+        presentes = sum(1 for t in tokens if t in alvo)
+        return presentes / len(tokens)
 
     # ==================================================================
     # Navegação
@@ -402,8 +449,14 @@ class RastreadorSite:
         hrefs = self._coletar_hrefs(html)
 
         def _ajustar_por_ddd(numero: str, base: Confianca) -> Confianca:
-            """Aplica a penalidade de DDD incompatível com a UF da empresa."""
-            if utils.ddd_coerente_com_uf(numero, empresa.uf):
+            """
+            Penaliza telefone cujo DDD não corresponde à localidade da empresa.
+
+            A checagem é por **cidade** quando ela é conhecida: um (11) da
+            capital num site atribuído a uma empresa de Amparo (19) indica
+            site de homônima, e sem o CNPJ confirmando cai direto para Baixa.
+            """
+            if utils.ddd_coerente_com_local(numero, empresa.cidade, empresa.uf):
                 return base
             return _rebaixar(base) if identidade_por_cnpj else Confianca.BAIXA
 

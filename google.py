@@ -103,6 +103,44 @@ class MotorBusca:
         """Executa a consulta e devolve até ``limite`` resultados."""
         raise NotImplementedError
 
+    # -- disjuntor ------------------------------------------------------
+
+    @property
+    def disjuntor(self) -> utils.Disjuntor:
+        """Disjuntor compartilhado desta fonte."""
+        return utils.Disjuntor.para(self.nome)
+
+    @property
+    def disponivel(self) -> bool:
+        """``False`` enquanto o disjuntor estiver aberto."""
+        return not self.disjuntor.aberto
+
+    def _corpo(self, metodo: str, url: str, **kwargs) -> str:
+        """
+        Busca o corpo de uma resposta contabilizando o resultado no disjuntor.
+
+        Um corpo vazio significa que a camada HTTP não conseguiu nada — host
+        inalcançável, bloqueio ou erro — e conta como falha. Um corpo não vazio
+        conta como sucesso, mesmo que a página não tenha resultados: "nenhum
+        resultado" é uma resposta legítima, não uma falha da fonte.
+        """
+        if not self.disponivel:
+            return ""
+
+        kwargs.setdefault("fator_delay", self.fator_delay)
+        kwargs.setdefault("avisar_bloqueio", True)
+
+        if metodo.upper() == "POST":
+            corpo = self.cliente.postar_texto(url, **kwargs)
+        else:
+            corpo = self.cliente.obter_texto(url, **kwargs)
+
+        if corpo:
+            self.disjuntor.registrar_sucesso()
+        else:
+            self.disjuntor.registrar_falha()
+        return corpo
+
     # -- utilidades compartilhadas -------------------------------------
 
     def _sopa(self, html: str):
@@ -192,13 +230,7 @@ class DuckDuckGoHTML(MotorBusca):
             (config.URL_DUCKDUCKGO, self._extrair_html),
             (config.URL_DUCKDUCKGO_LITE, self._extrair_lite),
         ):
-            corpo = self.cliente.postar_texto(
-                url,
-                dados=dados,
-                cabecalhos=cabecalhos,
-                fator_delay=self.fator_delay,
-                avisar_bloqueio=True,
-            )
+            corpo = self._corpo("POST", url, dados=dados, cabecalhos=cabecalhos)
             if not corpo:
                 continue
             resultados = extrator(corpo, limite)
@@ -284,11 +316,10 @@ class Bing(MotorBusca):
         # resultados genéricos do primeiro termo. Sem aspas, a relevância volta.
         consulta = consulta.replace('"', " ").strip()
 
-        html = self.cliente.obter_texto(
+        html = self._corpo(
+            "GET",
             config.URL_BING,
             params={"q": consulta, "setlang": "pt-BR", "cc": "BR", "count": str(limite)},
-            fator_delay=self.fator_delay,
-            avisar_bloqueio=True,
         )
         if not html:
             return []
@@ -331,10 +362,10 @@ class GoogleSearch(MotorBusca):
     fator_delay = 2.4
 
     def buscar(self, consulta: str, limite: int) -> List[ResultadoBusca]:
-        html = self.cliente.obter_texto(
+        html = self._corpo(
+            "GET",
             config.URL_GOOGLE,
             params={"q": consulta, "hl": "pt-BR", "gl": "br", "num": str(limite + 4)},
-            fator_delay=self.fator_delay,
         )
         if not html:
             return []
@@ -427,13 +458,19 @@ class Buscador:
         Falhas de rede em um motor apenas fazem passar para o próximo; apenas
         :class:`utils.CaptchaDetectado` é propagada, pois exige intervenção.
         """
-        for motor in self.motores:
+        disponiveis = [m for m in self.motores if m.disponivel]
+        if not disponiveis:
+            self.log.debug("Todos os buscadores estão desligados no momento.")
+            return []
+
+        for motor in disponiveis:
             try:
                 resultados = motor.buscar(consulta, limite)
             except utils.CaptchaDetectado:
                 # Google bloqueado não deve derrubar a pesquisa inteira quando
-                # existe outro motor disponível; só propaga se for o único.
-                if motor is self.motores[-1]:
+                # existe outro motor disponível; só propaga se for o último.
+                motor.disjuntor.registrar_falha()
+                if motor is disponiveis[-1]:
                     raise
                 self.log.warning("Captcha em %s; tentando o próximo motor.", motor.nome)
                 continue
@@ -678,7 +715,9 @@ class Buscador:
 
         for telefone in utils.extrair_telefones(texto):
             conf = confianca
-            if not utils.ddd_coerente_com_uf(telefone.digitos, empresa.uf):
+            if not utils.ddd_coerente_com_local(
+                telefone.digitos, empresa.cidade, empresa.uf
+            ):
                 conf = _rebaixar(conf)
             if telefone.ddd_herdado:
                 conf = _rebaixar(conf)

@@ -75,10 +75,22 @@ COR_CINZA = "FFE7E6E6"         # ignorada (já possuía contato válido)
 # Rede
 # ---------------------------------------------------------------------------
 
-TIMEOUT_HTTP = 15               # segundos por requisição HTTP
+TIMEOUT_HTTP = 15               # segundos para ler a resposta
+TIMEOUT_CONEXAO = 5             # segundos para estabelecer a conexão TCP
 TIMEOUT_PLAYWRIGHT = 30_000     # milissegundos (Playwright trabalha em ms)
 MAX_TENTATIVAS_HTTP = 3
 BACKOFF_BASE = 1.8              # fator exponencial entre tentativas
+
+# --- Disjuntor de fontes ---------------------------------------------------
+# Uma fonte bloqueada por IP não devolve erro HTTP: ela simplesmente não aceita
+# a conexão, e cada tentativa custa o timeout inteiro. Sem proteção, uma fonte
+# morta consome minutos por empresa antes de o sistema cair para a próxima.
+#
+# Após DISJUNTOR_FALHAS falhas consecutivas, a fonte é desligada por
+# DISJUNTOR_PAUSA segundos; depois disso uma requisição de teste decide se ela
+# volta ou continua desligada.
+DISJUNTOR_FALHAS = 3
+DISJUNTOR_PAUSA = 600
 
 # Intervalo aleatório (segundos) aplicado antes de cada requisição externa.
 # Evita padrão de tráfego robótico e reduz risco de bloqueio.
@@ -233,6 +245,43 @@ DDDS_POR_UF: Dict[str, set] = {
 # UF padrão da carteira de clientes (região de Campinas).
 UF_PADRAO = "SP"
 
+# DDD por cidade — checagem muito mais precisa que a checagem por UF.
+#
+# Motivação concreta: um telefone (11) de São Paulo capital passa na checagem
+# de UF para uma empresa de AMPARO, porque ambos são "SP". Mas Amparo é DDD 19,
+# e um telefone 11 num site supostamente da empresa é forte indício de que o
+# site é de outra empresa homônima. Foi assim que duas empresas distintas de
+# Amparo receberam os mesmos contatos de um site da capital.
+#
+# Cobre as cidades da carteira da região de Campinas. Cidades ausentes deste
+# mapa caem na checagem por UF, que é mais frouxa porém segura.
+# Para outras regiões, basta acrescentar as cidades aqui.
+DDD_POR_CIDADE: Dict[str, int] = {
+    # --- DDD 19 (Campinas e região) ---
+    "campinas": 19, "paulinia": 19, "indaiatuba": 19, "sumare": 19,
+    "limeira": 19, "cosmopolis": 19, "americana": 19, "amparo": 19,
+    "jaguariuna": 19, "valinhos": 19, "santa barbara d oeste": 19,
+    "santa barbara doeste": 19, "nova odessa": 19, "engenheiro coelho": 19,
+    "vinhedo": 19, "pedreira": 19, "artur nogueira": 19, "holambra": 19,
+    "rio das pedras": 19, "monte alegre do sul": 19, "rio claro": 19,
+    "morungaba": 19, "conchal": 19, "tuiuti": 19, "mombuca": 19,
+    "santo antonio de posse": 19, "cordeiropolis": 19, "socorro": 19,
+    "louveira": 19, "vargem grande do sul": 19, "hortolandia": 19,
+    "monte mor": 19, "elias fausto": 19, "capivari": 19, "iracemapolis": 19,
+    "piracicaba": 19, "araras": 19, "leme": 19, "mogi guacu": 19,
+    "mogi mirim": 19, "serra negra": 19, "aguas de lindoia": 19,
+    # --- DDD 11 (Grande São Paulo e Jundiaí) ---
+    "jundiai": 11, "atibaia": 11, "itatiba": 11, "varzea paulista": 11,
+    "itupeva": 11, "cabreuva": 11, "jarinu": 11, "pinhalzinho": 11,
+    "vargem grande paulista": 11, "sao paulo": 11, "braganca paulista": 11,
+    "campo limpo paulista": 11, "franco da rocha": 11, "cajamar": 11,
+    # --- DDD 15 (Sorocaba e região) ---
+    "cerquilho": 15, "sorocaba": 15, "tiete": 15, "boituva": 15,
+    "itu": 11, "salto": 11, "porto feliz": 15,
+    # --- DDD 16 (Araraquara e região) ---
+    "araraquara": 16, "sao carlos": 16, "ribeirao preto": 16,
+}
+
 # Telefones notoriamente genéricos que aparecem em rodapés de terceiros.
 TELEFONES_BLOQUEADOS = {
     "0000000000", "00000000000", "1111111111", "11111111111",
@@ -347,6 +396,14 @@ EXIGIR_CNPJ_PARA_TOKEN_UNICO = False
 # Quando a razão social tem um único token distintivo, ele precisa aparecer no
 # domínio do site (não basta estar no texto da página).
 TOKEN_UNICO_EXIGE_DOMINIO = True
+
+# Fração mínima das palavras da razão social que o domínio deve conter para que
+# ele seja aceito sem confirmação da cidade.
+#
+# "ancona.app.br" cobre 50% de "ANCONA BUFFET" e 50% de "ANCONA TRANSPORTES" —
+# duas empresas distintas de Amparo que receberam os mesmos contatos por causa
+# disso. Já "marsonmateriais.com.br" cobre 100% de "A.R. MARSON MATERIAIS".
+COBERTURA_MINIMA_DOMINIO = 0.8
 
 # Mínimo de tokens distintivos confirmados quando a razão social tem dois ou
 # mais — evita aceitar um site por coincidência de uma só palavra.

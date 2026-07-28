@@ -506,7 +506,9 @@ class RastreadorMaps:
         registrados = 0
         if ficha.telefone:
             conf = confianca
-            if not utils.ddd_coerente_com_uf(ficha.telefone, ficha.uf or empresa.uf):
+            if not utils.ddd_coerente_com_local(
+                ficha.telefone, ficha.cidade or empresa.cidade, ficha.uf or empresa.uf
+            ):
                 conf = Confianca.MEDIA if conf == Confianca.ALTA else Confianca.BAIXA
             if resultado.adicionar_telefone(ficha.telefone, evidencia, conf):
                 registrados += 1

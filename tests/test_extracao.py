@@ -130,6 +130,37 @@ class TestTelefones(unittest.TestCase):
         self.assertTrue(utils.ddd_coerente_com_uf("1938249898", "SP"))
         self.assertFalse(utils.ddd_coerente_com_uf("4138249898", "SP"))
 
+    def test_ddd_por_cidade_e_mais_rigoroso_que_por_uf(self):
+        """
+        Um (11) da capital passa na checagem por UF para uma empresa de Amparo,
+        mas Amparo é DDD 19 — a checagem por cidade pega o que a por UF deixa.
+        """
+        self.assertTrue(utils.ddd_coerente_com_uf("1155369432", "SP"))
+        self.assertFalse(
+            utils.ddd_coerente_com_local("1155369432", "AMPARO", "SP")
+        )
+        self.assertTrue(
+            utils.ddd_coerente_com_local("1938072031", "AMPARO", "SP")
+        )
+
+    def test_cidade_fora_do_mapa_cai_para_checagem_por_uf(self):
+        self.assertIsNone(utils.ddd_da_cidade("CIDADE INEXISTENTE"))
+        self.assertTrue(
+            utils.ddd_coerente_com_local("1155369432", "CIDADE INEXISTENTE", "SP")
+        )
+        self.assertFalse(
+            utils.ddd_coerente_com_local("4138249898", "CIDADE INEXISTENTE", "SP")
+        )
+
+    def test_cidades_da_carteira_mapeadas(self):
+        esperados = {
+            "CAMPINAS": 19, "AMPARO": 19, "COSMOPOLIS": 19, "PAULINIA": 19,
+            "JUNDIAI": 11, "ATIBAIA": 11, "CERQUILHO": 15, "ARARAQUARA": 16,
+            "VARGEM GRANDE PAULISTA": 11,
+        }
+        for cidade, ddd in esperados.items():
+            self.assertEqual(utils.ddd_da_cidade(cidade), ddd, cidade)
+
 
 class TestEmails(unittest.TestCase):
     """Extração e validação de e-mails."""
@@ -389,6 +420,54 @@ class TestValidacaoDeSite(unittest.TestCase):
         self.assertFalse(confirmado, motivo)
         self.assertEqual(confianca, Confianca.BAIXA)
 
+    def test_homonimos_nao_compartilham_o_mesmo_site(self):
+        """
+        Regressão do erro mais grave encontrado em produção.
+
+        ANCONA BUFFET e ANCONA TRANSPORTES, ambas de Amparo, receberam contatos
+        idênticos de ``ancona.app.br`` — um site da capital (DDD 11). O domínio
+        contém o token "ancona" das duas, mas não cobre o nome inteiro de
+        nenhuma delas.
+        """
+        pagina = (
+            "Ancona — soluções em eventos. São Paulo/SP. "
+            "Telefone (11) 5536-9432. WhatsApp (11) 94009-7785."
+        )
+        for razao in ("ANCONA BUFFET LTDA EPP", "ANCONA TRANSPORTES LTDA ME"):
+            empresa = Empresa(linha=18, razao_social=razao, cidade="AMPARO")
+            confirmado, confianca, motivo = self.rastreador._validar_identidade(
+                empresa, "https://ancona.app.br/", pagina, Confianca.ALTA
+            )
+            self.assertFalse(confirmado, f"{razao}: {motivo}")
+            self.assertEqual(confianca, Confianca.BAIXA)
+            self.assertIn("homônima", motivo)
+
+    def test_dominio_que_cobre_o_nome_inteiro_e_aceito(self):
+        """O mesmo mecanismo não pode reprovar um domínio legítimo."""
+        empresa = Empresa(
+            linha=5, razao_social="A.R. MARSON MATERIAIS EIRELI", cidade="COSMOPOLIS"
+        )
+        pagina = "A.R. Marson Materiais para Construção. Telefone (19) 3812-3043."
+        confirmado, confianca, _ = self.rastreador._validar_identidade(
+            empresa, "https://marsonmateriais.com.br", pagina, Confianca.ALTA
+        )
+        self.assertTrue(confirmado)
+        self.assertEqual(confianca, Confianca.MEDIA)
+
+    def test_cobertura_do_dominio(self):
+        casos = [
+            ("ANCONA BUFFET LTDA EPP", "ancona", 0.5),
+            ("ANCONA TRANSPORTES LTDA ME", "ancona", 0.5),
+            ("A.R. MARSON MATERIAIS EIRELI", "marsonmateriais", 1.0),
+            ("ZANCA TRANSPORTES LTDA", "zancatransportes", 1.0),
+        ]
+        for razao, nucleo, esperado in casos:
+            empresa = Empresa(linha=1, razao_social=razao)
+            self.assertAlmostEqual(
+                self.rastreador._cobertura_do_dominio(empresa, nucleo), esperado,
+                places=2, msg=razao,
+            )
+
     def test_token_unico_exige_presenca_no_dominio(self):
         empresa = Empresa(
             linha=5, razao_social="A.R. MARSON MATERIAIS EIRELI", cidade="COSMOPOLIS"
@@ -594,6 +673,56 @@ class TestMotoresBusca(unittest.TestCase):
         for url, esperado in casos:
             item = self.g.ResultadoBusca(titulo="x", url=url)
             self.assertEqual(item.fonte_provavel(), esperado, url)
+
+
+class TestDisjuntor(unittest.TestCase):
+    """
+    Disjuntor de fontes.
+
+    Regressão: com o DuckDuckGo bloqueado por IP (timeout de conexão TCP, não
+    erro HTTP), cada consulta gastava o timeout inteiro antes de cair para o
+    Bing. Com ~5 consultas por empresa, a execução passou de 30s para mais de
+    13 minutos por empresa.
+    """
+
+    def setUp(self):
+        self.d = utils.Disjuntor("fonte_de_teste", limite=3, pausa=60)
+
+    def test_fechado_no_inicio(self):
+        self.assertFalse(self.d.aberto)
+
+    def test_abre_apos_limite_de_falhas(self):
+        self.d.registrar_falha()
+        self.d.registrar_falha()
+        self.assertFalse(self.d.aberto, "não deve abrir antes do limite")
+        self.d.registrar_falha()
+        self.assertTrue(self.d.aberto)
+
+    def test_sucesso_zera_o_contador(self):
+        self.d.registrar_falha()
+        self.d.registrar_falha()
+        self.d.registrar_sucesso()
+        self.d.registrar_falha()
+        self.assertFalse(self.d.aberto)
+
+    def test_meio_aberto_apos_a_pausa(self):
+        """Passada a pausa, uma requisição de teste é permitida."""
+        curto = utils.Disjuntor("fonte_pausa_curta", limite=1, pausa=0)
+        curto.registrar_falha()
+        self.assertFalse(curto.aberto, "com pausa zero deve liberar o teste")
+
+    def test_registro_compartilhado_por_nome(self):
+        a = utils.Disjuntor.para("compartilhada")
+        b = utils.Disjuntor.para("compartilhada")
+        self.assertIs(a, b)
+
+    def test_reiniciar_todos_fecha_os_disjuntores(self):
+        d = utils.Disjuntor.para("sera_reiniciada")
+        for _ in range(d.limite):
+            d.registrar_falha()
+        self.assertTrue(d.aberto)
+        utils.Disjuntor.reiniciar_todos()
+        self.assertFalse(d.aberto)
 
 
 class TestCaptcha(unittest.TestCase):

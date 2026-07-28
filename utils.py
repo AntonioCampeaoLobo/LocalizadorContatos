@@ -560,6 +560,39 @@ def ddd_coerente_com_uf(digitos: str, uf: str) -> bool:
     return True if not esperados else int(d[:2]) in esperados
 
 
+def ddd_da_cidade(cidade: str) -> Optional[int]:
+    """
+    DDD esperado de uma cidade, ou ``None`` se ela não estiver mapeada.
+
+    Consulta :data:`config.DDD_POR_CIDADE`, que cobre a região da carteira.
+    """
+    chave = normalizar(cidade)
+    if not chave:
+        return None
+    return config.DDD_POR_CIDADE.get(chave)
+
+
+def ddd_coerente_com_local(digitos: str, cidade: str, uf: str) -> bool:
+    """
+    Coerência entre o DDD do telefone e a localidade da empresa.
+
+    Quando a cidade está mapeada, a checagem é feita **no nível da cidade** —
+    bem mais rigorosa que por UF. Um telefone (11) da capital não é aceito como
+    coerente para uma empresa de Amparo (DDD 19), embora ambos sejam "SP".
+
+    Cidades fora do mapa caem na checagem por UF, mais frouxa porém segura.
+    """
+    d = so_digitos(digitos)
+    if len(d) < 10 or d.startswith(("0800", "0300", "4004", "4003")):
+        return True
+
+    esperado = ddd_da_cidade(cidade)
+    if esperado is not None:
+        return int(d[:2]) == esperado
+
+    return ddd_coerente_com_uf(d, uf)
+
+
 # ===========================================================================
 # E-mails
 # ===========================================================================
@@ -821,6 +854,94 @@ class RotacionadorUserAgent:
 # Controle de ritmo
 # ===========================================================================
 
+class Disjuntor:
+    """
+    Disjuntor (*circuit breaker*) por fonte externa.
+
+    Protege contra a pior falha de rede na prática: a fonte bloqueada por IP,
+    que não devolve erro HTTP — apenas recusa a conexão. Cada tentativa custa o
+    timeout inteiro, e sem proteção uma fonte morta consome minutos por empresa
+    antes de o sistema desistir dela.
+
+    Estados:
+
+    * **fechado** — a fonte é usada normalmente;
+    * **aberto** — após ``limite`` falhas consecutivas, a fonte é pulada
+      imediatamente durante ``pausa`` segundos;
+    * **meio-aberto** — passada a pausa, uma requisição de teste é permitida.
+      Se der certo o disjuntor fecha; se falhar, abre de novo.
+
+    As instâncias são compartilhadas por nome entre todas as threads: o
+    bloqueio é do IP, não da thread.
+    """
+
+    _registro: Dict[str, "Disjuntor"] = {}
+    _lock_registro = threading.Lock()
+
+    def __init__(
+        self,
+        nome: str,
+        limite: int = config.DISJUNTOR_FALHAS,
+        pausa: float = config.DISJUNTOR_PAUSA,
+    ) -> None:
+        self.nome = nome
+        self.limite = max(1, limite)
+        self.pausa = max(0.0, pausa)
+        self._falhas = 0
+        self._aberto_ate = 0.0
+        self._lock = threading.Lock()
+        self.log = logging.getLogger("localizador.disjuntor")
+
+    @classmethod
+    def para(cls, nome: str) -> "Disjuntor":
+        """Devolve (criando se preciso) o disjuntor compartilhado da fonte."""
+        with cls._lock_registro:
+            if nome not in cls._registro:
+                cls._registro[nome] = cls(nome)
+            return cls._registro[nome]
+
+    @classmethod
+    def reiniciar_todos(cls) -> None:
+        """Fecha todos os disjuntores — usado ao iniciar uma nova execução."""
+        with cls._lock_registro:
+            for disjuntor in cls._registro.values():
+                disjuntor.registrar_sucesso()
+
+    @property
+    def aberto(self) -> bool:
+        """``True`` quando a fonte deve ser pulada sem tentativa."""
+        with self._lock:
+            if self._falhas < self.limite:
+                return False
+            if time.monotonic() >= self._aberto_ate:
+                # Meio-aberto: libera uma requisição de teste.
+                return False
+            return True
+
+    def registrar_falha(self) -> None:
+        """Contabiliza uma falha; ao atingir o limite, abre o disjuntor."""
+        with self._lock:
+            self._falhas += 1
+            if self._falhas == self.limite:
+                self._aberto_ate = time.monotonic() + self.pausa
+                self.log.warning(
+                    "Fonte %r desligada após %d falhas consecutivas. "
+                    "Nova tentativa em %s. O processamento continua pelas "
+                    "demais fontes.",
+                    self.nome, self._falhas, formatar_duracao(self.pausa),
+                )
+            elif self._falhas > self.limite:
+                self._aberto_ate = time.monotonic() + self.pausa
+
+    def registrar_sucesso(self) -> None:
+        """Zera o contador — a fonte voltou a responder."""
+        with self._lock:
+            if self._falhas >= self.limite:
+                self.log.info("Fonte %r voltou a responder.", self.nome)
+            self._falhas = 0
+            self._aberto_ate = 0.0
+
+
 class Limitador:
     """
     Aplica pausas aleatórias entre requisições para evitar bloqueios.
@@ -984,7 +1105,10 @@ class ClienteHTTP:
                     params=params,
                     data=dados,
                     headers=self._cabecalhos(cabecalhos),
-                    timeout=self.timeout,
+                    # (conexão, leitura): um host bloqueado costuma travar no
+                    # aperto de mão TCP. Separar os dois limites evita esperar
+                    # o timeout de leitura inteiro por um host inalcançável.
+                    timeout=(config.TIMEOUT_CONEXAO, self.timeout),
                     allow_redirects=True,
                     stream=True,
                 )

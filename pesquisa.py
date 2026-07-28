@@ -635,6 +635,10 @@ class MotorPesquisa:
         if self._thread and self._thread.is_alive():
             raise RuntimeError("O motor já está em execução.")
 
+        # Uma nova execução merece uma chance limpa em todas as fontes:
+        # o bloqueio que derrubou a rodada anterior pode já ter expirado.
+        utils.Disjuntor.reiniciar_todos()
+
         self.estado = EstadoProgresso(
             total=len(empresas), ignoradas=ignoradas, executando=True
         )
